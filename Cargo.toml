@@ -1,0 +1,10 @@
+[package]
+name = "validations"
+version = "0.1.0"
+edition = "2021"
+description = "Validaciones de negocio genéricas y ordenadas (port a Rust de mdambro/validations)."
+license = "MIT"
+rust-version = "1.75"
+
+# Sin dependencias: solo la biblioteca estándar.
+[dependencies]
