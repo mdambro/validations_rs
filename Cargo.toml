@@ -1,0 +1,11 @@
+[package]
+name = "validations_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Generic, ordered business validations (Rust port of mdambro/validations)."
+license = "Apache-2.0"
+repository = "https://github.com/mdambro/validations_rs"
+rust-version = "1.75"
+
+# No dependencies: standard library only.
+[dependencies]
