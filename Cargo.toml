@@ -5,7 +5,13 @@ edition = "2021"
 description = "Generic, ordered business validations (Rust port of mdambro/validations)."
 license = "Apache-2.0"
 repository = "https://github.com/mdambro/validations_rs"
+homepage = "https://github.com/mdambro/validations_rs"
+documentation = "https://docs.rs/validations_rs"
+authors = ["Matías D'Ambrosio <mati.dambrosio@gmail.com>"]
 rust-version = "1.75"
+readme = "README.md"
+keywords = ["validation", "validations", "business-rules", "rules", "validator"]
+categories = ["rust-patterns"]
 
 # No dependencies: standard library only.
 [dependencies]
