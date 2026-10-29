@@ -1,17 +1,18 @@
-//! # validations
+//! # validations_rs
 //!
-//! Port a Rust de la librería Java `mdambro/validations`: una interfaz genérica de validación
-//! con orden de ejecución, un ejecutor que las corre en orden cortando en el primer error y un
-//! único error de negocio con código estable.
+//! Rust port of the Java library `mdambro/validations`: generic validation interfaces, synchronous and
+//! asynchronous runners that follow the list order and stop at the first error, and a single business
+//! error with a stable code.
 //!
 //! ```
-//! use validations::{start_validations, BusinessLogicValidation, NotBlankValidation, RuleCode};
+//! use validations_rs::{start_validations, NotBlankValidation};
 //!
-//! let not_blank = NotBlankValidation { order: 10, code: RuleCode("VALUE_BLANK") };
-//! let list: [&dyn BusinessLogicValidation<str>; 1] = [&not_blank];
-//! assert!(start_validations(&list, "hola").is_ok());
-//! assert_eq!(start_validations(&list, "  ").unwrap_err().code, RuleCode("VALUE_BLANK"));
+//! let not_blank = NotBlankValidation::new();
+//! assert!(start_validations(&[&not_blank], "hello").is_ok());
+//! assert_eq!(start_validations(&[&not_blank], "  ").unwrap_err().code, NotBlankValidation::CODE);
 //! ```
+
+#![forbid(unsafe_code)]
 
 pub mod async_validation;
 pub mod error;
@@ -20,5 +21,10 @@ pub mod validation;
 
 pub use async_validation::{start_validations_async, AsyncBusinessLogicValidation, ValidationFuture};
 pub use error::{BusinessRuleError, RuleCode};
-pub use generic::{LengthBetweenValidation, NotBlankValidation, PredicateValidation, RangeValidation};
+pub use generic::{
+    AssertFalseValidation, AssertTrueValidation, EmailValidation, FutureValidation, LengthBetweenValidation,
+    MaxValidation, MinValidation, NegativeOrZeroValidation, NegativeValidation, NotBlankValidation, NotEmptyValidation,
+    NotNullValidation, NullValidation, PastValidation, PositiveOrZeroValidation, PositiveValidation,
+    PredicateValidation, RangeValidation, SizeBetweenValidation,
+};
 pub use validation::{start_validations, BusinessLogicValidation};

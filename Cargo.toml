@@ -1,10 +1,11 @@
 [package]
-name = "validations"
+name = "validations_rs"
 version = "0.1.0"
 edition = "2021"
-description = "Validaciones de negocio genéricas y ordenadas (port a Rust de mdambro/validations)."
-license = "MIT"
+description = "Generic, ordered business validations (Rust port of mdambro/validations)."
+license = "Apache-2.0"
+repository = "https://github.com/mdambro/validations_rs"
 rust-version = "1.75"
 
-# Sin dependencias: solo la biblioteca estándar.
+# No dependencies: standard library only.
 [dependencies]
