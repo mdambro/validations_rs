@@ -6,6 +6,7 @@ pub struct RuleCode(pub &'static str);
 
 impl RuleCode {
     /// Returns the code as text.
+    #[must_use]
     pub const fn as_str(&self) -> &'static str {
         self.0
     }

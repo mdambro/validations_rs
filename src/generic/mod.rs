@@ -2,6 +2,7 @@
 
 mod assert_false_validation;
 mod assert_true_validation;
+mod clock;
 mod email_validation;
 mod future_validation;
 mod length_between_validation;

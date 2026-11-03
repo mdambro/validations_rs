@@ -27,3 +27,28 @@ fn custom_message_keeps_the_code() {
     assert_eq!(error.code, PastValidation::CODE);
     assert_eq!(error.message, "The date of birth must already have occurred.");
 }
+
+fn at(secs: u64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+}
+
+#[test]
+fn uses_the_injected_clock() {
+    let rule = PastValidation::new().with_clock(|| at(1_000));
+    assert!(rule.validate(&at(999)).is_ok());
+    assert_eq!(rule.validate(&at(1_001)).unwrap_err().code, PastValidation::CODE);
+}
+
+#[test]
+fn rejects_the_current_instant() {
+    let rule = PastValidation::new().with_clock(|| at(1_000));
+    assert!(rule.validate(&at(1_000)).is_err());
+}
+
+#[test]
+fn the_clock_can_capture_state() {
+    let now = at(5_000);
+    let rule = PastValidation::new().with_clock(move || now).with_message("custom");
+    let error = rule.validate(&at(6_000)).unwrap_err();
+    assert_eq!(error.message, "custom");
+}

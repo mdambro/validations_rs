@@ -27,8 +27,9 @@ for name in ["Ada", "   "] {
 
 - **Explicit order.** Rules run in the order of the list. Whoever builds the list decides the order,
   not each rule, so changing it is just reordering an array.
-- **Stops at the first failure.** If a cheap rule fails, the following ones (for example a database
-  query) are not executed.
+- **Stops at the first failure, or collects them all.** With `start_validations`, if a cheap rule fails,
+  the following ones (for example a database query) are not executed. With `collect_validations`, every
+  rule runs and you get all the errors at once, which suits forms.
 - **A single error, with a stable code.** `BusinessRuleError` carries a `RuleCode` that does not change
   even if you change the message, plus `details` with the context of the violation (received value,
   bounds, etc.). Your API, your frontend or your logs can decide by code, without parsing text.
@@ -36,6 +37,10 @@ for name in ["Ada", "   "] {
   stays the same.
 - **Synchronous and asynchronous.** Local rules with no runtime or `async`; rules that wait on I/O with
   `AsyncBusinessLogicValidation`. The library depends on no runtime: use the one you already have.
+- **Tells "breaks the rule" apart from "could not check".** An asynchronous rule returns
+  `AsyncValidationError`: `Violation` when the data breaks the rule and `CheckFailed` when the rule could
+  not be checked (the database does not answer). You do not answer a server problem with a 422.
+- **Testable dates.** `PastValidation` and `FutureValidation` accept a clock through `.with_clock(...)`.
 - **One rule, one responsibility.** Each rule is a small struct that can be tested on its own. Your own
   rules and the built-in ones mix in the same list.
 - **A ready-to-use catalog.** 19 generic validations: nulls,
@@ -45,7 +50,8 @@ for name in ["Ada", "   "] {
 - **Correct behavior at the edges.** Length counts characters, not bytes; a `NaN` never passes a
   numeric rule.
 - **Lightweight and safe.** `std` only, `#![forbid(unsafe_code)]` and Rust 1.75 or later.
-- **Well tested.** More than 100 tests, one test file for each file in `src/`.
+- **Well tested.** More than 140 tests, one test file for each public file in `src/`, and the examples in
+  this README compile and run as doctests.
 
 ## Installation
 
@@ -57,7 +63,7 @@ or in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-validations_rs = "0.1.0"
+validations_rs = "0.2.0"
 ```
 
 ## Concepts
@@ -67,6 +73,8 @@ validations_rs = "0.1.0"
 | `BusinessLogicValidation<T>` | Trait for a **synchronous** rule over a value of type `T`. One method: `validate(&self, &T) -> Result<(), BusinessRuleError>`. |
 | `AsyncBusinessLogicValidation<T>` | The same, but **asynchronous**: for rules that wait on I/O (database, HTTP). |
 | `start_validations` / `start_validations_async` | Run a list of rules in order and return the first error. |
+| `collect_validations` | Runs every synchronous rule and returns all the errors, in order. |
+| `AsyncValidationError` | Error of an asynchronous rule: `Violation(BusinessRuleError)` or `CheckFailed(cause)`. |
 | `BusinessRuleError` | The business error: `code`, `message` and `details`. |
 | `RuleCode` | Stable code of the rule (for example `"VALUE_BLANK"`). |
 | Generic validations | Ready-to-use rules. See the [catalog](#catalog-of-generic-validations). |
@@ -151,7 +159,7 @@ All of them are created with `::new(...)`, accept `.with_message("...")` and exp
 | `AssertTrueValidation::new()` | The `bool` is `true`. | `VALUE_NOT_TRUE` |
 | `AssertFalseValidation::new()` | The `bool` is `false`. | `VALUE_NOT_FALSE` |
 
-**Dates** (`std::time::SystemTime`, compared against the moment of validation)
+**Dates** (`std::time::SystemTime`, compared against the moment of validation; `.with_clock(...)` sets that moment)
 
 | Rule | Validates | Code |
 |---|---|---|
@@ -162,7 +170,7 @@ All of them are created with `::new(...)`, accept `.with_message("...")` and exp
 
 | Rule | Validates | Code |
 |---|---|---|
-| `PredicateValidation::new(fn)` | A predicate `fn(&T) -> bool` returns `true`. | `PREDICATE_FAILED` |
+| `PredicateValidation::new(f)` | A predicate `f(&T) -> bool` returns `true`. It can be a function or a closure that captures variables. | `PREDICATE_FAILED` |
 
 Each rule comes with a default message (in English). Change it with `.with_message("...")`; **the code does not
 change**, so whoever consumes the error can keep relying on it.
@@ -175,6 +183,22 @@ match even.validate(&3) {
     Ok(()) => println!("even"),
     Err(error) => println!("{}", error.message), // "must be even"
 }
+```
+
+The predicate can capture values, and the date rules can use a fixed clock, which makes tests
+deterministic:
+
+```rust
+use std::time::{Duration, SystemTime};
+use validations_rs::{BusinessLogicValidation, PastValidation, PredicateValidation};
+
+let limit = 10;
+let below_limit = PredicateValidation::new(move |n: &i32| *n < limit);
+assert!(below_limit.validate(&3).is_ok());
+
+let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+let in_the_past = PastValidation::new().with_clock(move || now);
+assert!(in_the_past.validate(&(now - Duration::from_secs(1))).is_ok());
 ```
 
 ### What it does not include (on purpose)
@@ -316,15 +340,36 @@ match start_validations(&[&length], "far too long") {
 Use `code` for logic (mapping to an HTTP 422, translating the message, etc.) and `message` only for
 people. The `code` is what stays stable between versions.
 
+## Collecting every error
+
+`start_validations` stops at the first failure. When the caller needs to see every problem at once (a
+form, an API request with several fields), use `collect_validations`: it runs every rule and returns all
+the errors, in list order:
+
+```rust
+use validations_rs::{collect_validations, LengthBetweenValidation, NotBlankValidation};
+
+let errors = collect_validations::<str>(
+    &[&NotBlankValidation::new(), &LengthBetweenValidation::new(2, 40)],
+    " ",
+)
+.unwrap_err();
+
+for error in &errors {
+    println!("{error}"); // [VALUE_BLANK] ..., [VALUE_LENGTH_OUT_OF_RANGE] ...
+}
+assert_eq!(errors.len(), 2);
+```
+
 ## Asynchronous validations
 
 If a rule needs I/O, implement `AsyncBusinessLogicValidation<T>` and run it with
 `start_validations_async`:
 
-```rust,ignore
+```rust
 use validations_rs::{
-    start_validations_async, AsyncBusinessLogicValidation, BusinessRuleError, RuleCode,
-    ValidationFuture,
+    start_validations_async, AsyncBusinessLogicValidation, AsyncValidationError, BusinessRuleError,
+    RuleCode, ValidationFuture,
 };
 
 struct Signup {
@@ -335,25 +380,33 @@ struct EmailAvailable {
     // for example, a database pool or an HTTP client
 }
 
+impl EmailAvailable {
+    // the query would go here: repo.exists(email).await
+    async fn is_taken(&self, _email: &str) -> Result<bool, std::io::Error> {
+        Ok(false)
+    }
+}
+
 impl AsyncBusinessLogicValidation<Signup> for EmailAvailable {
     fn validate<'a>(&'a self, signup: &'a Signup) -> ValidationFuture<'a> {
         Box::pin(async move {
-            let taken = false; // the query would go here: repo.exists(&signup.email).await
+            // An I/O failure is not a broken rule: it is reported as `CheckFailed`.
+            let taken = self.is_taken(&signup.email).await.map_err(AsyncValidationError::check_failed)?;
             if taken {
-                Err(BusinessRuleError::new(RuleCode("EMAIL_TAKEN"), "the email is already registered"))
-            } else {
-                Ok(())
+                // `.into()` turns the business error into `AsyncValidationError::Violation`.
+                return Err(BusinessRuleError::new(RuleCode("EMAIL_TAKEN"), "the email is already registered").into());
             }
+            Ok(())
         })
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let signup = Signup { email: "ada@example.com".into() };
-    match start_validations_async(&[&EmailAvailable {}], &signup).await {
-        Ok(()) => println!("email available"),
-        Err(error) => println!("{error}"),
+// With any runtime (for example inside a tokio async function):
+async fn register(signup: &Signup) -> Result<(), String> {
+    match start_validations_async(&[&EmailAvailable {}], signup).await {
+        Ok(()) => Ok(()),
+        Err(AsyncValidationError::Violation(rule)) => Err(format!("422: {}", rule.message)),
+        Err(error @ AsyncValidationError::CheckFailed(_)) => Err(format!("503: {error}")),
     }
 }
 ```
@@ -387,8 +440,8 @@ src/                          tests/
 
 | Package | Contents |
 |---|---|
-| `validation` | `BusinessLogicValidation`, `start_validations` |
-| `async_validation` | `AsyncBusinessLogicValidation`, `start_validations_async` |
+| `validation` | `BusinessLogicValidation`, `start_validations`, `collect_validations` |
+| `async_validation` | `AsyncBusinessLogicValidation`, `AsyncValidationError`, `start_validations_async` |
 | `error` | `BusinessRuleError`, `RuleCode` |
 | `generic` | The 19 validations of the catalog |
 

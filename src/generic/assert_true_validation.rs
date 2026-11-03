@@ -14,11 +14,13 @@ impl AssertTrueValidation {
     pub const CODE: RuleCode = RuleCode("VALUE_NOT_TRUE");
 
     /// Creates the rule with the default message.
+    #[must_use]
     pub fn new() -> Self {
         Self { message: None }
     }
 
     /// Customizes the message without changing the rule's stable code.
+    #[must_use]
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
         self

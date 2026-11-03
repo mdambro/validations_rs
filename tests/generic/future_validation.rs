@@ -25,3 +25,20 @@ fn custom_message_keeps_the_code() {
     assert_eq!(error.code, FutureValidation::CODE);
     assert_eq!(error.message, "The booking must be in the future.");
 }
+
+fn at(secs: u64) -> std::time::SystemTime {
+    std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs)
+}
+
+#[test]
+fn uses_the_injected_clock() {
+    let rule = FutureValidation::new().with_clock(|| at(1_000));
+    assert!(rule.validate(&at(1_001)).is_ok());
+    assert_eq!(rule.validate(&at(999)).unwrap_err().code, FutureValidation::CODE);
+}
+
+#[test]
+fn rejects_the_current_instant() {
+    let rule = FutureValidation::new().with_clock(|| at(1_000));
+    assert!(rule.validate(&at(1_000)).is_err());
+}
