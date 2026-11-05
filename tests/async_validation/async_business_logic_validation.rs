@@ -10,7 +10,9 @@ impl AsyncBusinessLogicValidation<i32> for IsEven {
             if to_validate % 2 == 0 {
                 Ok(())
             } else {
-                Err(BusinessRuleError::new(RuleCode("ODD"), "Is odd.").with_detail("value", to_validate.to_string()))
+                Err(BusinessRuleError::new(RuleCode("ODD"), "Is odd.")
+                    .with_detail("value", to_validate.to_string())
+                    .into())
             }
         })
     }
@@ -21,7 +23,7 @@ fn assert_send<T: Send>(_: &T) {}
 #[test]
 fn validates_asynchronously() {
     assert!(block_on(IsEven.validate(&4)).is_ok());
-    let error = block_on(IsEven.validate(&3)).unwrap_err();
+    let error = block_on(IsEven.validate(&3)).unwrap_err().into_violation().expect("a rule violation");
     assert_eq!(error.code, RuleCode("ODD"));
     assert_eq!(error.detail("value"), Some("3"));
 }

@@ -18,11 +18,13 @@ impl<T> RangeValidation<T> {
     pub const CODE: RuleCode = RuleCode("VALUE_OUT_OF_RANGE");
 
     /// Creates the rule with the default message.
+    #[must_use]
     pub fn new(min: T, max: T) -> Self {
         Self { min, max, message: None }
     }
 
     /// Customizes the message without changing the rule's stable code.
+    #[must_use]
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
         self

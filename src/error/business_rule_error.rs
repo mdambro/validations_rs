@@ -15,17 +15,20 @@ pub struct BusinessRuleError {
 
 impl BusinessRuleError {
     /// Creates an error without details.
+    #[must_use]
     pub fn new(code: RuleCode, message: impl Into<String>) -> Self {
         Self { code, message: message.into(), details: Vec::new() }
     }
 
     /// Returns the error with one more detail.
+    #[must_use]
     pub fn with_detail(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.details.push((key.into(), value.into()));
         self
     }
 
     /// Looks up a detail by key.
+    #[must_use]
     pub fn detail(&self, key: &str) -> Option<&str> {
         self.details.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
     }
