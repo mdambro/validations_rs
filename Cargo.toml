@@ -1,17 +1,28 @@
 [package]
 name = "validations_rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Generic, ordered business validations (Rust port of mdambro/validations)."
+rust-version = "1.75"
+description = "Ordered business-rule validation with stable error codes: plain functions as rules, composable adapters, and async rules for I/O."
 license = "Apache-2.0"
 repository = "https://github.com/mdambro/validations_rs"
 homepage = "https://github.com/mdambro/validations_rs"
 documentation = "https://docs.rs/validations_rs"
 authors = ["Matías D'Ambrosio <mati.dambrosio@gmail.com>"]
-rust-version = "1.75"
 readme = "README.md"
-keywords = ["validation", "validations", "business-rules", "rules", "validator"]
+keywords = ["validation", "business-rules", "rules", "validator", "domain"]
 categories = ["rust-patterns"]
 
-# No dependencies: standard library only.
+[features]
+# Implements `serde::Serialize` for `RuleCode`, `Violation`, and `Violations`.
+serde = ["dep:serde"]
+
+# No required dependencies: the standard library only.
 [dependencies]
+serde = { version = "1", optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[package.metadata.docs.rs]
+all-features = true

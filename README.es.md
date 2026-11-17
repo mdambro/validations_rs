@@ -2,455 +2,290 @@
 
 [English](README.md) · **Español**
 
-Validaciones de negocio **ordenadas, combinables y con errores estables** para Rust. Sin dependencias,
-sin `unsafe`, con soporte síncrono y asíncrono.
-
-Es el port a Rust de [`mdambro/validations`](https://github.com/mdambro/validations) (Java).
+**Validación ordenada de reglas de negocio con códigos de error estables** para Rust. Una regla es una
+función común; la librería aporta el tipo de error, un catálogo de comprobaciones frecuentes, adaptadores
+para componerlas y reglas asíncronas para las comprobaciones que esperan I/O. Sin dependencias
+obligatorias, sin `unsafe`, sin runtime.
 
 ```rust
-use validations_rs::{
-    start_validations, LengthBetweenValidation, NotBlankValidation,
-};
+use validations_rs::prelude::*;
+use validations_rs::rules::{Email, Min, NotBlank};
 
-let not_blank = NotBlankValidation::new();
-let length = LengthBetweenValidation::new(2, 40);
-
-for name in ["Ada", "   "] {
-    match start_validations(&[&not_blank, &length], name) {
-        Ok(()) => println!("{name:?}: válido"),
-        Err(error) => println!("{name:?}: {} ({})", error.message, error.code), // VALUE_BLANK
-    }
+struct Registro {
+    nombre: String,
+    email: String,
+    edad: u8,
+    acepto_terminos: bool,
 }
+
+const TERMINOS_NO_ACEPTADOS: RuleCode = RuleCode("TERMINOS_NO_ACEPTADOS");
+
+// Una regla de negocio es una función.
+fn acepto_terminos(registro: &Registro) -> Result<(), Violation> {
+    ensure(registro.acepto_terminos, TERMINOS_NO_ACEPTADOS, "tienes que aceptar los términos")
+}
+
+let registro = Registro { nombre: "Ada".into(), email: "ada@example".into(), edad: 36, acepto_terminos: true };
+
+let resultado = validate(&registro, &[
+    &acepto_terminos,
+    &NotBlank.on("nombre", |r: &Registro| &r.nombre),
+    &Email.on("email", |r: &Registro| &r.email),
+    &Min(18).on("edad", |r: &Registro| &r.edad),
+]);
+
+let violacion = resultado.unwrap_err();
+assert_eq!(violacion.code().as_str(), "EMAIL_INVALID");
+assert_eq!(violacion.field(), Some("email"));
 ```
 
 ## Por qué usarla
 
-- **Orden explícito.** Las reglas se ejecutan en el orden de la lista. El orden lo decide quien arma
-  la lista, no cada regla, así que cambiarlo es reordenar un array.
-- **Corta en la primera falla, o junta todas.** Con `start_validations`, si una regla barata falla, las
-  siguientes (por ejemplo una consulta a la base de datos) no se ejecutan. Con `collect_validations`
-  se ejecutan todas y recibís todos los errores juntos, útil para formularios.
-- **Un único error, con código estable.** `BusinessRuleError` lleva un `RuleCode` que no cambia aunque
-  cambies el mensaje, más `details` con el contexto de la violación (valor recibido, límites, etc.).
-  Tu API, tu frontend o tus logs deciden por el código, sin parsear textos.
-- **Mensajes personalizables sin romper nada.** `.with_message("...")` cambia el texto; el código
-  queda igual.
-- **Síncrona y asíncrona.** Reglas locales sin runtime ni `async`; reglas que esperan I/O con
-  `AsyncBusinessLogicValidation`. La librería no depende de ningún runtime: usa el que ya tengas.
-- **Distingue "no cumple" de "no se pudo verificar".** Una regla asíncrona devuelve
-  `AsyncValidationError`: `Violation` cuando el dato rompe la regla y `CheckFailed` cuando la regla no se
-  pudo comprobar (la base de datos no responde). Así no respondés un 422 a un problema del servidor.
-- **Fechas testeables.** `PastValidation` y `FutureValidation` aceptan un reloj con `.with_clock(...)`.
-- **Una regla, una responsabilidad.** Cada regla es una struct pequeña y testeable por separado. Las
-  reglas propias y las incluidas se mezclan en la misma lista.
-- **Catálogo listo para usar.** 19 validaciones genéricas: nulos, textos,
-  colecciones, números, booleanos, emails y fechas.
-- **Trabaja con tipos sin tamaño.** Validan `str` y `[T]` directamente, sin obligarte a tener un
-  `String` o un `Vec`.
-- **Comportamiento correcto en los bordes.** La longitud cuenta caracteres, no bytes; los `NaN` nunca
-  pasan una regla numérica.
-- **Ligera y segura.** Solo `std`, `#![forbid(unsafe_code)]` y Rust 1.75 o superior.
-- **Bien probada.** Más de 140 pruebas, un archivo de pruebas por cada archivo público de `src/`, y los
-  ejemplos de este README se compilan y ejecutan como doctests.
+- **Las reglas son funciones.** Cualquier `fn(&T) -> Result<(), Violation>`, o closure con esa firma, es
+  una regla. Escribes una regla de negocio en tres líneas con `ensure`, la pruebas llamándola y la pones en
+  una lista. Implementas el trait `Rule` a mano solo cuando la regla lleva configuración.
+- **Códigos estables, no textos.** Una `Violation` lleva un `RuleCode` que no cambia aunque cambie el
+  mensaje, el campo al que aplica y detalles (el valor recibido, los límites). Tu API, tu frontend y tus
+  logs deciden por código, sin parsear texto.
+- **Orden explícito.** Las reglas corren en el orden de la lista. `validate` se detiene en la primera
+  violación, así una regla barata falla antes de que corra una cara; `validate_all` corre todas y devuelve
+  todas las violaciones, para formularios.
+- **Componible.** `.with_code(...)`, `.with_message(...)` y `.on("campo", getter)` adaptan cualquier
+  regla, incluidas tus funciones, sin escribir un tipo nuevo.
+- **"Rompe la regla" no es "no se pudo comprobar".** Una regla asíncrona devuelve `AsyncError::Violation`
+  cuando el dato la rompe y `AsyncError::CheckFailed` cuando la comprobación misma falló (la base de datos
+  no responde), con la causa guardada como `source` del error. No se responde un problema del servidor
+  con un 422.
+- **Correcta en los bordes.** La longitud cuenta caracteres, no bytes; `NaN` nunca pasa una regla
+  numérica; las reglas de fechas reciben un reloj, así los tests son deterministas.
+- **Sirve para cualquier proyecto.** Solo la biblioteca estándar, una feature `serde` opcional, ningún
+  runtime async, `#![forbid(unsafe_code)]`, Rust 1.75 o posterior. Todos los tipos públicos implementan
+  `Debug`, y los errores implementan `std::error::Error + Send + Sync`.
+
+### Cuándo usar otra cosa
+
+`validations_rs` es para **reglas de negocio**: comprobaciones ordenadas, con códigos estables, que viven
+en la capa de dominio o de aplicación y pueden ser asíncronas. Si lo que necesitas es anotar un DTO con
+`#[validate(length(min = 1))]` y comprobar su forma en el borde, te conviene un crate basado en derive como
+[`validator`](https://crates.io/crates/validator) o [`garde`](https://crates.io/crates/garde). Los dos
+enfoques se complementan: derive en el borde, `validations_rs` en el caso de uso.
 
 ## Instalación
 
 ```sh
 cargo add validations_rs
-```
-
-o en tu `Cargo.toml`:
-
-```toml
-[dependencies]
-validations_rs = "0.2.0"
+# con `serde::Serialize` para los tipos de error:
+cargo add validations_rs --features serde
 ```
 
 ## Conceptos
 
-| Pieza | Para qué sirve |
+| Elemento | Qué es |
 |---|---|
-| `BusinessLogicValidation<T>` | Trait de una regla **síncrona** sobre un valor de tipo `T`. Un método: `validate(&self, &T) -> Result<(), BusinessRuleError>`. |
-| `AsyncBusinessLogicValidation<T>` | Lo mismo, pero **asíncrona**: para reglas que esperan I/O (base de datos, HTTP). |
-| `start_validations` / `start_validations_async` | Ejecutan una lista de reglas en orden y devuelven el primer error. |
-| `collect_validations` | Ejecuta todas las reglas síncronas y devuelve todos los errores, en orden. |
-| `AsyncValidationError` | Error de una regla asíncrona: `Violation(BusinessRuleError)` o `CheckFailed(causa)`. |
-| `BusinessRuleError` | El error de negocio: `code`, `message` y `details`. |
-| `RuleCode` | Código estable de la regla (por ejemplo `"VALUE_BLANK"`). |
-| Validaciones genéricas | Reglas listas para usar. Ver el [catálogo](#catálogo-de-validaciones-genéricas). |
+| `Rule<T>` | Comprueba un `&T` y devuelve `Ok(())` o una `Violation`. Implementado para todo `Fn(&T) -> Result<(), Violation>`. |
+| `ensure(condición, código, mensaje)` | La forma de una línea de escribir el cuerpo de una regla. |
+| `Violation` | La regla rota: `code()`, `message()`, `field()`, `details()`. |
+| `Violations` | Todas las violaciones de `validate_all`; nunca está vacía. |
+| `validate` / `validate_all` | Corren una lista de reglas: la primera violación, o todas. |
+| `RuleExt` | Adaptadores para cualquier regla: `with_code`, `with_message`, `on`. |
+| `AsyncRule<T>`, `validate_async`, `AsyncError` | Reglas que esperan I/O. |
+| `rules` | El catálogo: texto, números, presencia, colecciones, fechas. |
 
-## Uso básico
+## Escribir reglas
 
-Arma una lista de reglas y pásala a `start_validations` junto con el valor a validar:
+La mayoría de las reglas son funciones. Dale a cada regla de negocio su propia constante `RuleCode`, así
+quien llama puede hacer `match` sobre ella:
 
 ```rust
-use validations_rs::{
-    start_validations, LengthBetweenValidation, NotBlankValidation,
-};
+use validations_rs::{ensure, validate, RuleCode, Violation};
 
-let not_blank = NotBlankValidation::new();
-let length = LengthBetweenValidation::new(2, 40)
-    .with_message("el nombre debe tener entre 2 y 40 caracteres");
+pub struct Transferencia {
+    pub monto_centavos: u64,
+    pub origen: String,
+    pub destino: String,
+}
 
-// El orden de la lista es el orden de ejecución.
-for name in ["Ada", "   "] {
-    match start_validations(&[&not_blank, &length], name) {
-        Ok(()) => println!("{name:?}: válido"),
-        Err(error) => println!("{name:?}: {}", error.message), // corta en la primera falla
+pub const MISMA_CUENTA: RuleCode = RuleCode("TRANSFERENCIA_MISMA_CUENTA");
+pub const MONTO_CERO: RuleCode = RuleCode("TRANSFERENCIA_MONTO_CERO");
+
+fn cuentas_distintas(t: &Transferencia) -> Result<(), Violation> {
+    ensure(t.origen != t.destino, MISMA_CUENTA, "la cuenta de origen y la de destino deben ser distintas")
+}
+
+fn tiene_monto(t: &Transferencia) -> Result<(), Violation> {
+    ensure(t.monto_centavos > 0, MONTO_CERO, "el monto debe ser mayor que cero")
+}
+
+let transferencia = Transferencia { monto_centavos: 0, origen: "A".into(), destino: "B".into() };
+let violacion = validate(&transferencia, &[&cuentas_distintas, &tiene_monto]).unwrap_err();
+assert_eq!(violacion.code(), MONTO_CERO);
+```
+
+Un closure que captura configuración también es una regla. Cuando una regla necesita configuración que
+fija quien la usa, y la quieres reutilizable y con nombre, hazla un tipo e implementa `Rule`:
+
+```rust
+use validations_rs::{ensure, validate, Rule, RuleCode, Violation};
+
+pub struct Transferencia { pub monto_centavos: u64 }
+
+pub const SUPERA_LIMITE: RuleCode = RuleCode("TRANSFERENCIA_SUPERA_LIMITE");
+
+pub struct LimiteDiario { pub centavos: u64 }
+
+impl Rule<Transferencia> for LimiteDiario {
+    fn check(&self, t: &Transferencia) -> Result<(), Violation> {
+        ensure(t.monto_centavos <= self.centavos, SUPERA_LIMITE, "la transferencia supera el límite diario")
+            .map_err(|v| v.with_detail("limite", self.centavos))
     }
 }
+
+let violacion = validate(&Transferencia { monto_centavos: 900 }, &[&LimiteDiario { centavos: 500 }]).unwrap_err();
+assert_eq!(violacion.detail("limite"), Some("500"));
 ```
 
-También puedes usar una regla suelta, sin ejecutor:
+## El catálogo
 
-```rust
-use validations_rs::{BusinessLogicValidation, MinValidation};
+El módulo `rules` trae las comprobaciones que todo proyecto termina escribiendo. Cada una informa un
+código estable de `rules::codes`.
 
-let adult = MinValidation::new(18);
-match adult.validate(&10) {
-    Ok(()) => println!("mayor de edad"),
-    Err(error) => println!("{}", error.message),
-}
-```
-
-## Catálogo de validaciones genéricas
-
-Todas se crean con `::new(...)`, aceptan `.with_message("...")` y exponen su código como
-`Regla::CODE`.
-
-**Presencia**
-
-| Regla | Valida | Código |
+| Regla | Comprueba | Código |
 |---|---|---|
-| `NotNullValidation::new()` | Un `Option` tiene valor. | `VALUE_MISSING` |
-| `NullValidation::new()` | Un `Option` no tiene valor. | `VALUE_PRESENT` |
+| `NotBlank` | texto con algún carácter que no sea espacio | `VALUE_BLANK` |
+| `Length::between(min, max)`, `at_least`, `at_most` | cantidad de caracteres | `VALUE_LENGTH_OUT_OF_RANGE` |
+| `Email` | una dirección bien formada (estructural, no RFC 5322) | `EMAIL_INVALID` |
+| `Min(x)`, `Max(x)` | cualquier valor `PartialOrd + Display` | `VALUE_BELOW_MIN`, `VALUE_ABOVE_MAX` |
+| `InRange::new(min, max)` | rango inclusivo | `VALUE_OUT_OF_RANGE` |
+| `Positive`, `PositiveOrZero`, `Negative`, `NegativeOrZero` | signo de un número primitivo | `VALUE_NOT_POSITIVE`, `VALUE_NEGATIVE`, `VALUE_NOT_NEGATIVE`, `VALUE_POSITIVE` |
+| `IsSome`, `IsNone` | un `Option` presente o ausente | `VALUE_MISSING`, `VALUE_PRESENT` |
+| `IsTrue`, `IsFalse` | un booleano | `VALUE_NOT_TRUE`, `VALUE_NOT_FALSE` |
+| `NotEmpty` | una colección con algún elemento | `COLLECTION_EMPTY` |
+| `Count::between(min, max)`, `at_least`, `at_most` | cantidad de elementos | `SIZE_OUT_OF_RANGE` |
+| `Past::new()`, `Future::new()` | un `SystemTime` anterior o posterior a ahora; `.with_clock(...)` para tests | `DATE_NOT_PAST`, `DATE_NOT_FUTURE` |
 
-**Textos**
-
-| Regla | Valida | Código | Detalles |
-|---|---|---|---|
-| `NotBlankValidation::new()` | No está vacío ni solo con espacios. | `VALUE_BLANK` | — |
-| `LengthBetweenValidation::new(min, max)` | Cantidad de **caracteres** entre `min` y `max`, inclusive. | `VALUE_LENGTH_OUT_OF_RANGE` | `length`, `min`, `max` |
-| `EmailValidation::new()` | Tiene forma de dirección de email. | `EMAIL_INVALID` | `email` |
-
-**Colecciones** (`Vec`, slices, arrays, `HashMap`, `HashSet`, `BTreeMap`…)
-
-| Regla | Valida | Código | Detalles |
-|---|---|---|---|
-| `NotEmptyValidation::new()` | Tiene al menos un elemento. | `COLLECTION_EMPTY` | — |
-| `SizeBetweenValidation::new(min, max)` | Cantidad de elementos entre `min` y `max`, inclusive. | `SIZE_OUT_OF_RANGE` | `size`, `min`, `max` |
-
-**Números** (cualquier tipo `PartialOrd + Display`; los de signo también piden `Default`)
-
-| Regla | Valida | Código | Detalles |
-|---|---|---|---|
-| `MinValidation::new(min)` | Valor `>= min`. | `VALUE_BELOW_MIN` | `value`, `min` |
-| `MaxValidation::new(max)` | Valor `<= max`. | `VALUE_ABOVE_MAX` | `value`, `max` |
-| `RangeValidation::new(min, max)` | Valor entre `min` y `max`, inclusive. | `VALUE_OUT_OF_RANGE` | `value`, `min`, `max` |
-| `PositiveValidation::new()` | Valor `> 0`. | `VALUE_NOT_POSITIVE` | `value` |
-| `PositiveOrZeroValidation::new()` | Valor `>= 0`. | `VALUE_NEGATIVE` | `value` |
-| `NegativeValidation::new()` | Valor `< 0`. | `VALUE_NOT_NEGATIVE` | `value` |
-| `NegativeOrZeroValidation::new()` | Valor `<= 0`. | `VALUE_POSITIVE` | `value` |
-
-**Booleanos**
-
-| Regla | Valida | Código |
-|---|---|---|
-| `AssertTrueValidation::new()` | El `bool` es `true`. | `VALUE_NOT_TRUE` |
-| `AssertFalseValidation::new()` | El `bool` es `false`. | `VALUE_NOT_FALSE` |
-
-**Fechas** (`std::time::SystemTime`, comparado contra el momento de validar; `.with_clock(...)` fija ese momento)
-
-| Regla | Valida | Código |
-|---|---|---|
-| `PastValidation::new()` | El instante es anterior a ahora. | `DATE_NOT_PAST` |
-| `FutureValidation::new()` | El instante es posterior a ahora. | `DATE_NOT_FUTURE` |
-
-**Genérica**
-
-| Regla | Valida | Código |
-|---|---|---|
-| `PredicateValidation::new(f)` | Un predicado `f(&T) -> bool` devuelve `true`. Puede ser una función o una closure que capture variables. | `PREDICATE_FAILED` |
-
-Cada regla trae un mensaje predeterminado (en inglés). Cámbialo con `.with_message("...")`; **el código no
-cambia**, así que quien consume el error puede seguir confiando en él.
+Las reglas de texto aceptan todo lo que sea `AsRef<str>`; las de colecciones, todo lo que una referencia
+compartida pueda iterar (slices, arrays, `Vec`, mapas, sets).
 
 ```rust
-use validations_rs::{BusinessLogicValidation, PredicateValidation};
+use validations_rs::rules::{Count, Length, NotBlank, Positive};
+use validations_rs::{validate_all, Rule};
 
-let even = PredicateValidation::new(|n: &i32| n % 2 == 0).with_message("debe ser par");
-match even.validate(&3) {
-    Ok(()) => println!("par"),
-    Err(error) => println!("{}", error.message), // "debe ser par"
-}
+assert!(Positive.check(&3_i64).is_ok());
+assert!(Count::at_most(2).check(&vec!["a", "b", "c"]).is_err());
+
+let violaciones = validate_all("  ", &[&NotBlank, &Length::at_least(3)]).unwrap_err();
+assert_eq!(violaciones.len(), 2);
 ```
 
-El predicado puede capturar valores, y las fechas pueden usar un reloj fijo, lo que hace las pruebas
-deterministas:
+No se incluye a propósito, para no tener dependencias: expresiones regulares (usa el crate `regex` en tu
+propia regla) ni decimales de precisión arbitraria (`Min` y `Max` aceptan cualquier tipo ordenado, así que
+tu tipo decimal funciona si implementa `PartialOrd + Display`).
+
+## Adaptar reglas
+
+`RuleExt` está implementado para toda regla. Cambia el código por uno de tu dominio, cambia el mensaje o
+comprueba un campo de un valor más grande. `on` registra el nombre del campo en la violación, y `on`
+anidado arma una ruta como `direccion.ciudad`:
 
 ```rust
-use std::time::{Duration, SystemTime};
-use validations_rs::{BusinessLogicValidation, PastValidation, PredicateValidation};
+use validations_rs::rules::{Min, NotBlank};
+use validations_rs::{validate_all, Rule, RuleCode, RuleExt};
 
-let limit = 10;
-let below_limit = PredicateValidation::new(move |n: &i32| *n < limit);
-assert!(below_limit.validate(&3).is_ok());
+struct Direccion { ciudad: String }
+struct Cliente { edad: u8, direccion: Direccion }
 
-let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
-let in_the_past = PastValidation::new().with_clock(move || now);
-assert!(in_the_past.validate(&(now - Duration::from_secs(1))).is_ok());
-```
+let ciudad = NotBlank.with_message("Indica tu ciudad.").on("ciudad", |d: &Direccion| &d.ciudad);
 
-### Qué no incluye (a propósito)
+let violaciones = validate_all(&Cliente { edad: 16, direccion: Direccion { ciudad: "".into() } }, &[
+    &Min(18).with_code(RuleCode("MENOR_DE_EDAD")).on("edad", |c: &Cliente| &c.edad),
+    &ciudad.on("direccion", |c: &Cliente| &c.direccion),
+])
+.unwrap_err();
 
-Para mantener la librería sin dependencias, no incluye reglas que requieren un motor externo. Se
-resuelven igual con `PredicateValidation` o con una regla propia:
-
-- **Expresiones regulares**: usa el crate `regex` dentro de una regla propia.
-- **Decimales de precisión arbitraria**: `MinValidation` y `MaxValidation` funcionan con `f32`, `f64` y enteros.
-- **"Pasado o presente" / "futuro o presente"**: un `SystemTime` es un instante, y "presente" no tiene
-  sentido a esa resolución; usa `PastValidation` y `FutureValidation`.
-
-## Escribir tus propias reglas
-
-Implementa el trait para tu tipo. Una regla es una struct pequeña con una sola responsabilidad:
-
-```rust
-use validations_rs::{
-    start_validations, BusinessLogicValidation, BusinessRuleError, RuleCode,
-};
-
-struct Signup {
-    email: String,
-    age: u8,
-}
-
-struct EmailDomainNotBlocked;
-
-impl EmailDomainNotBlocked {
-    const CODE: RuleCode = RuleCode("EMAIL_DOMAIN_BLOCKED");
-}
-
-impl BusinessLogicValidation<Signup> for EmailDomainNotBlocked {
-    fn validate(&self, signup: &Signup) -> Result<(), BusinessRuleError> {
-        if signup.email.ends_with("@spam.test") {
-            Err(BusinessRuleError::new(Self::CODE, "ese dominio no está permitido")
-                .with_detail("email", signup.email.clone()))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-struct AdultOnly;
-
-impl BusinessLogicValidation<Signup> for AdultOnly {
-    fn validate(&self, signup: &Signup) -> Result<(), BusinessRuleError> {
-        if signup.age >= 18 {
-            Ok(())
-        } else {
-            Err(BusinessRuleError::new(RuleCode("UNDERAGE"), "debes ser mayor de edad")
-                .with_detail("age", signup.age.to_string()))
-        }
-    }
-}
-
-let signup = Signup { email: "ada@example.com".into(), age: 16 };
-match start_validations(&[&EmailDomainNotBlocked, &AdultOnly], &signup) {
-    Ok(()) => println!("registro válido"),
-    Err(error) => println!("{}: {}", error.code, error.message), // UNDERAGE: ...
-}
-```
-
-### Validar los campos de un objeto con las reglas del catálogo
-
-Delega desde tu propia regla en las del catálogo. Cada campo queda en una regla con nombre propio, y el
-objeto completo se valida con una lista ordenada:
-
-```rust
-use validations_rs::{
-    start_validations, BusinessLogicValidation, BusinessRuleError, EmailValidation,
-    LengthBetweenValidation, MinValidation, NotBlankValidation,
-};
-
-struct Signup {
-    name: String,
-    email: String,
-    age: u8,
-}
-
-struct ValidName;
-
-impl BusinessLogicValidation<Signup> for ValidName {
-    fn validate(&self, signup: &Signup) -> Result<(), BusinessRuleError> {
-        start_validations::<str>(
-            &[&NotBlankValidation::new(), &LengthBetweenValidation::new(2, 40)],
-            &signup.name,
-        )
-    }
-}
-
-struct ValidEmail;
-
-impl BusinessLogicValidation<Signup> for ValidEmail {
-    fn validate(&self, signup: &Signup) -> Result<(), BusinessRuleError> {
-        EmailValidation::new().validate(&signup.email)
-    }
-}
-
-struct AdultOnly;
-
-impl BusinessLogicValidation<Signup> for AdultOnly {
-    fn validate(&self, signup: &Signup) -> Result<(), BusinessRuleError> {
-        MinValidation::<u8>::new(18).with_message("debes ser mayor de edad").validate(&signup.age)
-    }
-}
-
-let invalid = Signup { name: "Ada".into(), email: "ada".into(), age: 36 };
-
-match start_validations(&[&ValidName, &ValidEmail, &AdultOnly], &invalid) {
-    Ok(()) => println!("registro válido"),
-    Err(error) if error.code == EmailValidation::CODE => println!("email inválido: {}", error.message),
-    Err(error) => println!("{error}"),
-}
+let campos: Vec<_> = violaciones.iter().map(|v| v.field()).collect();
+assert_eq!(campos, [Some("edad"), Some("direccion.ciudad")]);
+assert_eq!(violaciones.first().code().as_str(), "MENOR_DE_EDAD");
+assert_eq!(violaciones.first().detail("min"), Some("18"));
 ```
 
 ## Leer el error
 
-`BusinessRuleError` tiene tres campos públicos y implementa `std::error::Error` y `Display`
-(`"[CODIGO] mensaje"`):
+Decide por código; muestra el mensaje; usa el campo y los detalles para señalar la entrada:
 
 ```rust
-use validations_rs::{
-    start_validations, LengthBetweenValidation,
-};
+use validations_rs::rules::{codes, Length};
+use validations_rs::Rule;
 
-let length = LengthBetweenValidation::new(2, 5);
+let violacion = Length::between(2, 40).check("A").unwrap_err();
 
-match start_validations(&[&length], "demasiado largo") {
-    Ok(()) => println!("válido"),
-    Err(error) if error.code == LengthBetweenValidation::CODE => {
-        println!("{}", error.message);               // para mostrar o loguear
-        println!("max: {:?}", error.detail("max"));  // Some("5"): contexto de la violación
+match violacion.code() {
+    codes::VALUE_LENGTH_OUT_OF_RANGE => {
+        assert_eq!(violacion.detail("length"), Some("1"));
+        assert_eq!(violacion.detail("min"), Some("2"));
     }
-    Err(error) => println!("{error}"),               // cualquier otra regla: "[CODIGO] mensaje"
+    otro => panic!("regla inesperada {otro}"),
 }
 ```
 
-Usa `code` para la lógica (mapear a un HTTP 422, traducir el mensaje, etc.) y `message` solo para
-personas. El `code` es lo que se mantiene estable entre versiones.
+Con la feature `serde`, `Violation` se serializa como
+`{"code": "...", "message": "...", "field": "..." | null, "details": {"clave": "valor"}}`, y `Violations`
+como una lista de ellas, lista para el cuerpo de un error HTTP.
 
-## Reunir todos los errores
+## Reglas asíncronas
 
-`start_validations` corta en la primera falla. Cuando quien llama necesita ver todos los problemas de una
-vez (un formulario, una API con varios campos), usa `collect_validations`: ejecuta todas las reglas y
-devuelve todos los errores, en el orden de la lista:
-
-```rust
-use validations_rs::{collect_validations, LengthBetweenValidation, NotBlankValidation};
-
-let errors = collect_validations::<str>(
-    &[&NotBlankValidation::new(), &LengthBetweenValidation::new(2, 40)],
-    " ",
-)
-.unwrap_err();
-
-for error in &errors {
-    println!("{error}"); // [VALUE_BLANK] ..., [VALUE_LENGTH_OUT_OF_RANGE] ...
-}
-assert_eq!(errors.len(), 2);
-```
-
-## Validaciones asíncronas
-
-Si una regla necesita I/O, implementa `AsyncBusinessLogicValidation<T>` y ejecútala con
-`start_validations_async`:
+Una regla que consulta una base de datos u otro servicio implementa `AsyncRule`. El trait devuelve un
+future en un `Box`, así funciona detrás de `&dyn` y con cualquier runtime. Informa una regla rota con una
+`Violation` y una comprobación fallida con `AsyncError::check_failed(causa)`:
 
 ```rust
-use validations_rs::{
-    start_validations_async, AsyncBusinessLogicValidation, AsyncValidationError, BusinessRuleError,
-    RuleCode, ValidationFuture,
-};
+use validations_rs::{validate_async, AsyncError, AsyncRule, RuleCode, RuleFuture, Violation};
 
-struct Signup {
-    email: String,
+pub trait Usuarios: Send + Sync {
+    fn existe_email(&self, email: &str) -> Result<bool, std::io::Error>;
 }
 
-struct EmailAvailable {
-    // por ejemplo, un pool de base de datos o un cliente HTTP
+pub const EMAIL_EN_USO: RuleCode = RuleCode("EMAIL_EN_USO");
+
+pub struct EmailLibre<'r> {
+    pub usuarios: &'r dyn Usuarios,
 }
 
-impl EmailAvailable {
-    // acá iría la consulta: repo.exists(email).await
-    async fn is_taken(&self, _email: &str) -> Result<bool, std::io::Error> {
-        Ok(false)
-    }
-}
-
-impl AsyncBusinessLogicValidation<Signup> for EmailAvailable {
-    fn validate<'a>(&'a self, signup: &'a Signup) -> ValidationFuture<'a> {
+impl AsyncRule<str> for EmailLibre<'_> {
+    fn check<'a>(&'a self, email: &'a str) -> RuleFuture<'a> {
         Box::pin(async move {
-            // Un fallo de I/O no es una regla rota: se informa como `CheckFailed`.
-            let taken = self.is_taken(&signup.email).await.map_err(AsyncValidationError::check_failed)?;
-            if taken {
-                // `.into()` convierte el error de negocio en `AsyncValidationError::Violation`.
-                return Err(BusinessRuleError::new(RuleCode("EMAIL_TAKEN"), "el email ya está registrado").into());
+            if self.usuarios.existe_email(email).map_err(AsyncError::check_failed)? {
+                return Err(Violation::new(EMAIL_EN_USO, "el email ya está registrado").into());
             }
             Ok(())
         })
     }
 }
 
-// Con cualquier runtime (por ejemplo dentro de una función async de tokio):
-async fn register(signup: &Signup) -> Result<(), String> {
-    match start_validations_async(&[&EmailAvailable {}], signup).await {
-        Ok(()) => Ok(()),
-        Err(AsyncValidationError::Violation(rule)) => Err(format!("422: {}", rule.message)),
-        Err(error @ AsyncValidationError::CheckFailed(_)) => Err(format!("503: {error}")),
-    }
+async fn registrar(usuarios: &dyn Usuarios, email: &str) -> Result<(), AsyncError> {
+    validate_async(email, &[&EmailLibre { usuarios }]).await
 }
 ```
 
-Un patrón habitual es **combinar ambas**: primero las reglas síncronas (baratas) y, solo si pasan,
-las asíncronas (que tocan la red o la base de datos).
+Corre primero las reglas síncronas con `validate`, así las comprobaciones baratas fallan antes de
+cualquier I/O. En el borde, mapea `AsyncError::Violation` a un error del cliente (como HTTP 422) y
+`AsyncError::CheckFailed` a un error del servidor (como HTTP 503).
 
-> Las reglas asíncronas deben ser `Send + Sync` y su futuro es `Send`, para que se puedan usar con
-> runtimes multihilo.
+## Migrar desde la 0.2
 
-## ¿Síncrono o asíncrono?
-
-Se mantienen las dos variantes porque resuelven necesidades distintas:
-
-- **Síncrona**: reglas locales que no esperan I/O. No requiere runtime ni `async`.
-- **Asíncrona**: reglas que consultan servicios o persistencia.
-
-## Estructura del código
-
-Los módulos agrupan los tipos por función y cada struct tiene su propio archivo bajo `src/`. Las
-pruebas siguen la misma estructura bajo `tests/`:
-
-```text
-src/                          tests/
-├── validation/               ├── validation/
-├── async_validation/         ├── async_validation/
-├── error/                    ├── error/
-└── generic/                  ├── generic/
-                              └── support/        utilidades compartidas
-```
-
-| Paquete | Contenido |
-|---|---|
-| `validation` | `BusinessLogicValidation`, `start_validations`, `collect_validations` |
-| `async_validation` | `AsyncBusinessLogicValidation`, `AsyncValidationError`, `start_validations_async` |
-| `error` | `BusinessRuleError`, `RuleCode` |
-| `generic` | Las 19 validaciones del catálogo |
+La tabla completa está en el [CHANGELOG](CHANGELOG.md). En resumen: `BusinessRuleError` es `Violation`,
+`BusinessLogicValidation` es `Rule`, `start_validations(&reglas, valor)` es `validate(valor, &reglas)`,
+`collect_validations` es `validate_all`, los structs `*Validation` son el catálogo `rules::*` y
+`PredicateValidation` es una función común con `ensure`.
 
 ## Desarrollo
 
 ```sh
-cargo test
+cargo test --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 ```
+
+Los ejemplos de este README y de la documentación de la API se compilan y ejecutan como tests.
 
 ## Licencia
 
-Consulta el archivo [LICENSE](LICENSE).
+Apache-2.0. Ver el archivo [LICENSE](LICENSE).
