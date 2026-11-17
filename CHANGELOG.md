@@ -4,6 +4,92 @@ All notable changes to this project are documented in this file. The format foll
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-16
+
+A redesign around the Rust API Guidelines. The behavior of the catalog is the same and every error code
+keeps its text; the API around it changed, so this release breaks every caller.
+
+### Added
+
+- Plain functions and closures are rules: `Rule<T>` is implemented for every
+  `Fn(&T) -> Result<(), Violation>`.
+- `ensure(condition, code, message)` writes a rule's body in one line.
+- `RuleExt`, implemented for every rule: `.with_code(code)`, `.with_message(text)`, and
+  `.on("field", getter)`, which checks a field of a larger value and records its name. Nested `on` builds
+  a path such as `address.city`.
+- `Violation::field()`, `Violation::at_field(name)`, and `Violation::detail(key)`.
+- `Violations`, the error of `validate_all`: a list that is never empty, with `first()`, `iter()`,
+  `Display`, and `Error`.
+- `Length::at_least`/`at_most` and `Count::at_least`/`at_most`.
+- An optional `serde` feature that implements `Serialize` for `RuleCode`, `Violation`, and `Violations`.
+- `prelude` module.
+- Every public type implements `Debug`; unit rules also implement `Clone`, `Copy`, `Default`, `PartialEq`,
+  `Eq`, and `Hash`. `RuleCode` implements `Hash` and `Ord`, so it works as a map key.
+
+### Changed (breaking)
+
+- Runners take the value first: `validate(value, &rules)`. With the value first, a list of plain functions
+  needs no type annotations.
+- `Violation` keeps its fields private behind accessors (`code()`, `message()`, `details()`), so the type
+  can grow without another breaking release. Messages are `Cow<'static, str>`: static text is not copied.
+- Catalog rules live in the `rules` module, are named by what they check, and are built as values
+  (`NotBlank`, `Min(18)`, `Length::between(2, 40)`) instead of through `new()`.
+- `AsyncRule::check` returns `RuleFuture`, a boxed `Send` future, and the trait requires `Send + Sync`.
+- Sign rules (`Positive` and the others) work on the primitive numbers through the sealed `Number` trait,
+  instead of on any type whose `Default` is zero.
+
+### Removed
+
+- `PredicateValidation`: write a function with `ensure`, which also gives the rule its own code.
+- The `CODE` associated constants: the codes are in `rules::codes`.
+- `NotNullValidation` and `NullValidation`: replaced by `IsSome` and `IsNone`, which name what they check.
+
+## Migrating from 0.2
+
+| 0.2 | 0.3 |
+|---|---|
+| `BusinessRuleError` | `Violation` |
+| `error.code`, `error.message`, `error.details` | `violation.code()`, `violation.message()`, `violation.details()`, `violation.detail(key)` |
+| `BusinessLogicValidation<T>` with `fn validate(&self, &T)` | `Rule<T>` with `fn check(&self, &T)`, or a plain function |
+| `start_validations(&rules, value)` | `validate(value, &rules)` |
+| `collect_validations(&rules, value)` → `Vec<BusinessRuleError>` | `validate_all(value, &rules)` → `Violations` |
+| `AsyncBusinessLogicValidation<T>` | `AsyncRule<T>` |
+| `AsyncValidationError` | `AsyncError` |
+| `ValidationFuture` | `RuleFuture` |
+| `start_validations_async(&rules, value)` | `validate_async(value, &rules)` |
+| `PredicateValidation::new(code, msg, predicate)` | `fn rule(v: &T) -> Result<(), Violation> { ensure(predicate(v), code, msg) }` |
+| `NotBlankValidation::new()` | `rules::NotBlank` |
+| `LengthBetweenValidation::new(min, max)` | `rules::Length::between(min, max)` |
+| `EmailValidation::new()` | `rules::Email` |
+| `MinValidation::new(x)`, `MaxValidation::new(x)` | `rules::Min(x)`, `rules::Max(x)` |
+| `RangeValidation::new(min, max)` | `rules::InRange::new(min, max)` |
+| `PositiveValidation::new()` (and the other sign rules) | `rules::Positive` (`PositiveOrZero`, `Negative`, `NegativeOrZero`) |
+| `NotNullValidation::new()`, `NullValidation::new()` | `rules::IsSome`, `rules::IsNone` |
+| `AssertTrueValidation::new()`, `AssertFalseValidation::new()` | `rules::IsTrue`, `rules::IsFalse` |
+| `NotEmptyValidation::new()` | `rules::NotEmpty` |
+| `SizeBetweenValidation::new(min, max)` | `rules::Count::between(min, max)` |
+| `PastValidation::new()`, `FutureValidation::new()` | `rules::Past::new()`, `rules::Future::new()` (same `with_clock`) |
+| `.with_message(text)` on a catalog rule | `.with_message(text)` from `RuleExt`, on any rule |
+
+A rule in 0.2 and the same rule in 0.3:
+
+```rust,ignore
+// 0.2.0
+pub struct AdultValidation;
+impl BusinessLogicValidation<User> for AdultValidation {
+    fn validate(&self, user: &User) -> Result<(), BusinessRuleError> {
+        if user.age >= 18 { Ok(()) } else { Err(BusinessRuleError::new(UNDERAGE, "must be an adult")) }
+    }
+}
+start_validations(&[&AdultValidation], &user)?;
+
+// 0.3.0
+fn adult(user: &User) -> Result<(), Violation> {
+    ensure(user.age >= 18, UNDERAGE, "must be an adult")
+}
+validate(&user, &[&adult])?;
+```
+
 ## [0.2.0] - 2026-11-03
 
 ### Added
@@ -67,5 +153,6 @@ Err(AsyncValidationError::CheckFailed(cause)) => ... // usually HTTP 503 or gRPC
 - First release: synchronous and asynchronous business validations with stable error codes and a
   catalog of 19 generic rules.
 
+[0.3.0]: https://github.com/mdambro/validations_rs/compare/9b284f1...release/0.3.0
 [0.2.0]: https://github.com/mdambro/validations_rs/compare/2f4ae15...release/0.2.0
 [0.1.0]: https://github.com/mdambro/validations_rs/tree/2f4ae15
